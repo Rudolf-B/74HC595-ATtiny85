@@ -1,0 +1,243 @@
+#include <avr/io.h>
+const int SER_Pin = 0;   //pin 14 on the first shift register
+const int RCLK_Pin = 1;  //pin 12 on both registers
+const int SRCLK_Pin = 2; //pin 11 on both shift registers
+const int buttonPin = 3; //pin for the push button
+const int exitPin = 4;   //pin for the push button
+
+bool buttons[8];                // array for button scan pattern for the First 74hc595 shift register
+bool led[8];                    // array to hold LED values for the second 74hc595 shift register
+bool button_state = false;      // state of the push button
+bool last_button_state = false; // state of the push button in the previous iteration
+
+int led_on_off = 0;
+int button_scan = 0;
+int current_button = 0; // index of the current LED that is turned on for the larson effect
+int SPEED = 170;
+int A = -30;
+
+byte data[] = {
+  0b10000001, // dataA
+  0b01000010, // dataB
+  0b00100100, // dataC
+  0b00011000, // dataD
+  0b00011000  // dataCL
+};
+
+byte dataB[] = {
+  0b11111111, // dataAA
+  0b01111110, // dataBB
+  0b00111100, // dataCC
+  0b00011000, // dataDD
+  0b0000000  // dataCLCL
+};
+
+
+void setup() {
+  pinMode(SER_Pin, OUTPUT);
+  pinMode(RCLK_Pin, OUTPUT);
+  pinMode(SRCLK_Pin, OUTPUT);
+  pinMode(buttonPin, INPUT);
+  digitalWrite(RCLK_Pin, LOW);
+
+  for (int i = 0; i < 16; i++) {
+    shiftOut(SER_Pin, SRCLK_Pin, MSBFIRST, 0);
+  }
+  digitalWrite(RCLK_Pin, HIGH);
+  digitalWrite(RCLK_Pin, LOW);
+
+  while (digitalRead(exitPin) == LOW) {
+    leftright();
+  }
+  delay(500);
+
+  while (digitalRead(exitPin) == LOW) {
+    backforth();
+  }
+  delay(500);
+
+  while (digitalRead(exitPin) == LOW) {
+    increment();
+  }
+  delay(500);
+  while (digitalRead(exitPin) == LOW) {
+    incrementB();
+  }
+}
+
+void loop() {
+  // update the button values for the scan
+  for (int i = 0; i < 8; i++) {
+    if (i == current_button) {
+      buttons[i] = 1;
+    } else {
+      buttons[i] = 0;
+    }
+  }
+
+  // shift out the LED values to the shift registers
+  for (int i = 0; i < 8; i++) {
+    bitWrite(led_on_off, i, led[i]);
+    bitWrite(button_scan, i, buttons[i]);
+  }
+
+  shiftOut(SER_Pin, SRCLK_Pin, MSBFIRST, led_on_off);
+  shiftOut(SER_Pin, SRCLK_Pin, MSBFIRST, button_scan);
+
+  // register update
+  digitalWrite(RCLK_Pin, HIGH);
+  digitalWrite(RCLK_Pin, LOW);
+
+  // read the state of the push button
+  button_state = digitalRead(buttonPin);
+
+  // check if the button is pressed and was not pressed in the previous iteration
+  if (last_button_state == LOW && button_state == HIGH) {
+    // toggle the corresponding LED in the LEDS array
+    led[current_button] = !led[current_button];
+    delay(250);
+  }
+  // update the current_button index for the larson effect(scan the buttons)
+  current_button = (current_button + 1) % 8;
+
+  // update the last_button_state variable for the next iteration
+  last_button_state = button_state;
+}
+
+void leftright() {
+  digitalWrite(RCLK_Pin, LOW);
+  for (int i = 7; i >= 0; i--) {
+    shiftOut(SER_Pin, SRCLK_Pin, LSBFIRST, 1 << i);
+    digitalWrite(RCLK_Pin, HIGH);
+    digitalWrite(RCLK_Pin, LOW);
+    delay(SPEED);
+  }
+  SPEED += A;
+  if (SPEED == 50) {
+    A = 10;
+  }
+  if (SPEED == 140) {
+    A = -10;
+  }
+}
+
+void backforth() {
+  //digitalWrite(RCLK_Pin, LOW);
+  for (int i = 6; i >= 0; i--) {
+    shiftOut(SER_Pin, SRCLK_Pin, LSBFIRST, 1 << i);
+    digitalWrite(RCLK_Pin, HIGH);
+    digitalWrite(RCLK_Pin, LOW);
+    delay(SPEED);
+  }
+  //digitalWrite(RCLK_Pin, LOW);
+  for (int i = 1; i < 8; i++) {
+    shiftOut(SER_Pin, SRCLK_Pin, LSBFIRST, 1 << i);
+    digitalWrite(RCLK_Pin, HIGH);
+    digitalWrite(RCLK_Pin, LOW);
+    delay(SPEED);
+  }
+  SPEED += A;
+  if (SPEED <= 10) {
+    A = 10;
+  }
+  if (SPEED >= 80) {
+    A = -10;
+  }
+}
+
+void increment() {
+  // iterate forward through data array
+  for (int i = 0; i < 5; i++) {
+    byte currentData = data[i];
+    // iterate through each bit from MSB to LSB
+    for (int j = 7; j >= 0; j--) {
+      digitalWrite(SRCLK_Pin, HIGH);
+      digitalWrite(SRCLK_Pin, LOW);
+      digitalWrite(SER_Pin, (currentData >> j) & 1); // shift out the current bit
+    }
+    // shift out the dataCL bits
+    for (int j = 0; j < 9; j++) {
+      digitalWrite(SRCLK_Pin, HIGH);
+      digitalWrite(SRCLK_Pin, LOW);
+      digitalWrite(SER_Pin, (data[4] >> j) & 1); // use dataCL
+    }
+    digitalWrite(RCLK_Pin, HIGH);
+    delay(SPEED);
+    digitalWrite(RCLK_Pin, LOW);
+  }
+  // iterate backward through data array
+  for (int i = 3; i >= 0; i--) {
+    byte currentData = data[i];
+    // iterate through each bit from MSB to LSB
+    for (int j = 7; j >= 0; j--) {
+      digitalWrite(SRCLK_Pin, HIGH);
+      digitalWrite(SRCLK_Pin, LOW);
+      digitalWrite(SER_Pin, (currentData >> j) & 1); // shift out the current bit
+    }
+    // shift out the dataCL bits
+    for (int j = 0; j < 9; j++) {
+      digitalWrite(SRCLK_Pin, HIGH);
+      digitalWrite(SRCLK_Pin, LOW);
+      digitalWrite(SER_Pin, (data[4] >> j) & 1); // use dataCL
+    }
+    digitalWrite(RCLK_Pin, HIGH);
+    delay(SPEED);
+    digitalWrite(RCLK_Pin, LOW);
+  }
+  SPEED += A;
+  if (SPEED <= 50) {
+    A = 10;
+  }
+  if (SPEED >= 110) {
+    A = -10;
+  }
+}
+
+void incrementB() {
+  // iterate forward through data array
+  for (int i = 0; i < 5; i++) {
+    byte currentDataB = dataB[i];
+    // iterate through each bit from MSB to LSB
+    for (int j = 7; j >= 0; j--) {
+      digitalWrite(SRCLK_Pin, HIGH);
+      digitalWrite(SRCLK_Pin, LOW);
+      digitalWrite(SER_Pin, (currentDataB >> j) & 1); // shift out the current bit
+    }
+    // shift out the dataCL bits
+    for (int j = 0; j < 9; j++) {
+      digitalWrite(SRCLK_Pin, HIGH);
+      digitalWrite(SRCLK_Pin, LOW);
+      digitalWrite(SER_Pin, (dataB[4] >> j) & 1); // use dataCL
+    }
+    digitalWrite(RCLK_Pin, HIGH);
+    delay(200);
+    digitalWrite(RCLK_Pin, LOW);
+  }
+  delay(150);
+  // iterate backward through data array
+  for (int i = 3; i >= 0; i--) {
+    byte currentDataB = dataB[i];
+    // iterate through each bit from MSB to LSB
+    for (int j = 7; j >= 0; j--) {
+      digitalWrite(SRCLK_Pin, HIGH);
+      digitalWrite(SRCLK_Pin, LOW);
+      digitalWrite(SER_Pin, (currentDataB >> j) & 1); // shift out the current bit
+    }
+    // shift out the dataCL bits
+    for (int j = 0; j < 9; j++) {
+      digitalWrite(SRCLK_Pin, HIGH);
+      digitalWrite(SRCLK_Pin, LOW);
+      digitalWrite(SER_Pin, (dataB[3] >> j) & 1); // use dataCL
+    }
+    digitalWrite(RCLK_Pin, HIGH);
+    delay(200);
+    digitalWrite(RCLK_Pin, LOW);
+  }
+  SPEED += A;
+  if (SPEED <= 50) {
+    A = 10;
+  }
+  if (SPEED >= 110) {
+    A = -10;
+  }
+}
